@@ -1,55 +1,39 @@
 package community.redrover.merge.util;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.yaml.snakeyaml.Yaml;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 
 public class FileUtils {
 
-    public static Map<String, Object> loadFileToMap(Path path) throws IOException {
-        File file = path.toFile();
+    public static LinkedHashMap<String, Object> loadFileToMap(Path path) {
+        try {
+            File file = getFile(path);
+            String fileExtension = getFileExtension(file.getName());
+            SupportedExtension extension = SupportedExtension.fromValue(fileExtension);
 
-        if (!file.exists()) {
-            throw new IllegalArgumentException("Nonexisting file path provided: " + path);
+            return extension.getObjectMapper().readValue(file, new TypeReference<LinkedHashMap<String, Object>>() {});
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read file: " + path, e);
         }
-
-        if (file.length() == 0) {
-            throw new UncheckedIOException("File is empty: " + path, new IOException());
-        }
-
-        String fileExtension = getFileExtension(file.getName());
-
-        return switch (fileExtension.toLowerCase()) {
-            case "json" -> parseJsonFile(file);
-            case "yaml", "yml" -> parseYamlFile(file);
-            default -> throw new IllegalArgumentException("Unsupported file format: " + fileExtension);
-        };
     }
 
-    public static void writeMapToFile(Path filePath, Map<String, Object> data) throws IOException {
-        String extension = getFileExtension(filePath.getFileName().toString()).toLowerCase();
+    public static void writeMapToFile(Path filePath, LinkedHashMap<String, Object> data) {
+        File file = filePath.toFile();
+        String extension = getFileExtension(filePath.getFileName().toString());
+        SupportedExtension ext = SupportedExtension.fromValue(extension);
 
-        switch (extension) {
-            case "json" -> {
-                ObjectMapper objectMapper = new ObjectMapper();
-                objectMapper.writerWithDefaultPrettyPrinter().writeValue(filePath.toFile(), data);
-            }
-            case "yaml", "yml" -> {
-                Yaml yaml = new Yaml();
-                try (FileWriter writer = new FileWriter(filePath.toFile())) {
-                    yaml.dump(data, writer);
-                }
-            }
-            default -> throw new IllegalArgumentException("Unsupported file format: " + extension);
+        try {
+            ext.getObjectMapper()
+                    .writerWithDefaultPrettyPrinter()
+                    .writeValue(file, data);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write file: " + filePath, e);
         }
     }
 
@@ -57,30 +41,29 @@ public class FileUtils {
      * Load file to object
      * @param filePath Absolute file path and name to load
      * @param clazz Class to load to
-     * @return  return deserialized object
-     * @param <T>   Type of object to load to
-     * @throws IOException if file is not found or cannot be read
+     * @param <T> Type of object to load to
+     * @return Deserialized object
+     * @throws UncheckedIOException if file is not found or cannot be read
+     * @throws IllegalArgumentException if path is invalid or unsupported
      */
-    public static <T> T loadFileToObject(String filePath, Class<T> clazz) throws IOException {
+    public static <T> T loadFileToObject(Path filePath, Class<T> clazz) {
         if (clazz == null) {
             throw new IllegalArgumentException("Class cannot be null");
         }
 
-        final String fileName = filePath.trim().toLowerCase();
-        File file = getFile(fileName);
+        try {
+            File file = getFile(filePath);
+            String fileExtension = getFileExtension(file.getName());
+            SupportedExtension extension = SupportedExtension.fromValue(fileExtension);
 
-        final SupportedExtension EXTENSION = SupportedExtension.fromValue(getFileExtension(fileName));
-        return EXTENSION.getObjectMapper().readValue(file, clazz);
+            return extension.getObjectMapper().readValue(file, clazz);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to parse file: " + filePath, e);
+        }
     }
 
-    private static File getFile(String fileName) throws IOException {
-        Objects.requireNonNull(fileName, "File name cannot be null");
-
-        if (fileName.isBlank()) {
-            throw new IllegalArgumentException("File name cannot be null or empty");
-        }
-
-        Path path = Paths.get(fileName);
+    private static File getFile(Path path) throws IOException {
+        Objects.requireNonNull(path, "Path cannot be null");
 
         if (!Files.exists(path)) {
             throw new IllegalArgumentException("Nonexisting file path provided: " + path);
@@ -95,30 +78,6 @@ public class FileUtils {
         }
 
         return path.toFile();
-    }
-
-    private static Map<String, Object> parseJsonFile(File file) throws IOException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        try {
-
-            return objectMapper.readValue(file, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-        } catch (IOException e) {
-            throw new IOException("Error reading JSON file: " + file.getPath(), e);
-        }
-    }
-
-    private static Map<String, Object> parseYamlFile(File file) throws IOException {
-        Yaml yaml = new Yaml();
-        try (FileInputStream inputStream = new FileInputStream(file)) {
-            Map<String, Object> result = yaml.load(inputStream);
-            if (result == null) {
-                throw new IOException("YAML file is empty or invalid: " + file.getPath());
-            }
-
-            return result;
-        } catch (IOException e) {
-            throw new IOException("Error reading YAML file: " + file.getPath(), e);
-        }
     }
 
     private static String getFileExtension(String filePath) {
